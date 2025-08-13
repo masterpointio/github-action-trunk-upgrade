@@ -1,0 +1,230 @@
+name: Trunk Upgrade with Auto-merge
+description: Automated Trunk upgrades with status check handling and auto-merge
+author: hello@masterpoint.io
+
+inputs:
+  github-token:
+    description: GitHub token for creating PRs and performing operations
+    required: true
+
+  app-id:
+    description: GitHub App ID for bot authentication
+    required: false
+
+  app-private-key:
+    description: GitHub App private key for bot authentication
+    required: false
+
+  reviewers:
+    description: Reviewers to assign to the PR (e.g., '@org/team' or 'user1,user2')
+    required: false
+    default: ""
+
+  prefix:
+    description: Prefix for commit messages and PR titles
+    required: false
+    default: "chore: "
+
+  merge-method:
+    description: Method to use for merging (squash, merge, rebase)
+    required: false
+    default: squash
+
+  check-timeout-minutes:
+    description: Maximum time to wait for status checks (in minutes)
+    required: false
+    default: "10"
+
+  check-interval-seconds:
+    description: Interval between status check polls (in seconds)
+    required: false
+    default: "30"
+
+outputs:
+  pull-request-number:
+    description: The number of the created pull request
+    value: ${{ steps.trunk-upgrade.outputs.pull-request-number }}
+
+  pull-request-url:
+    description: The URL of the created pull request
+    value: ${{ steps.trunk-upgrade.outputs.pull-request-url }}
+
+  merged:
+    description: Whether the PR was successfully merged
+    value: ${{ steps.auto-merge.outputs.merged }}
+
+runs:
+  using: composite
+  steps:
+    - name: Validate inputs
+      shell: bash
+      run: |
+        if [[ -z "${{ inputs.github-token }}" ]]; then
+          echo "::error::github-token is required"
+          exit 1
+        fi
+
+        if [[ "${{ inputs.merge-method }}" != "squash" && "${{ inputs.merge-method }}" != "merge" && "${{ inputs.merge-method }}" != "rebase" ]]; then
+          echo "::error::merge-method must be one of: squash, merge, rebase"
+          exit 1
+        fi
+
+    - name: Generate GitHub App Token
+      if: inputs.app-id != '' && inputs.app-private-key != ''
+      uses: tibdex/github-app-token@3beb63f4bd073e61482598c45c71c1019b59b73a # v2.1.0
+      id: generate-token
+      with:
+        app_id: ${{ inputs.app-id }}
+        private_key: ${{ inputs.app-private-key }}
+
+    - name: Determine GitHub Token
+      shell: bash
+      id: github-token
+      run: |
+        if [[ -n "${{ steps.generate-token.outputs.token }}" ]]; then
+          echo "token=${{ steps.generate-token.outputs.token }}" >> $GITHUB_OUTPUT
+        else
+          echo "token=${{ inputs.github-token }}" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Run Trunk Upgrade
+      id: trunk-upgrade
+      uses: trunk-io/trunk-action/upgrade@4d5ecc89b2691705fd08c747c78652d2fc806a94 # v1.1.19
+      with:
+        github-token: ${{ steps.github-token.outputs.token }}
+        reviewers: ${{ inputs.reviewers }}
+        prefix: ${{ inputs.prefix }}
+
+    - name: Auto-merge PR
+      if: steps.trunk-upgrade.outputs.pull-request-number != ''
+      id: auto-merge
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        PR_NUMBER: ${{ steps.trunk-upgrade.outputs.pull-request-number }}
+        REPO_URL: https://github.com/${{ github.repository }}
+        MERGE_METHOD: ${{ inputs.merge-method }}
+        TIMEOUT_MINUTES: ${{ inputs.check-timeout-minutes }}
+        CHECK_INTERVAL: ${{ inputs.check-interval-seconds }}
+      run: |
+        set -euo pipefail
+
+        # Helper functions
+        get_checks() {
+          local check_type="$1"
+          if [ "$check_type" = "required" ]; then
+            gh pr checks "$PR_NUMBER" --required --json state,bucket 2>/dev/null || echo "[]"
+          else
+            gh pr checks "$PR_NUMBER" --json state,bucket 2>/dev/null || echo "[]"
+          fi
+        }
+
+        count_checks() {
+          echo "$1" | jq '. | length'
+        }
+
+        has_failed_checks() {
+          echo "$1" | jq -e '.[] | select(.bucket=="fail")' >/dev/null 2>&1
+        }
+
+        count_pending_checks() {
+          echo "$1" | jq '[.[] | select(.state!="SUCCESS" or .bucket!="pass")] | length'
+        }
+
+        approve_and_merge_pr() {
+          local approval_message="$1"
+          echo "🤖 Auto-approving and merging PR $REPO_URL/pull/$PR_NUMBER..."
+          gh pr review "$PR_NUMBER" --approve --body "$approval_message"
+
+          # Retry merge up to 3 times to handle base branch updates
+          local max_retries=3
+          local retry_count=0
+
+          while [ $retry_count -lt $max_retries ]; do
+            if gh pr merge "$PR_NUMBER" --"$MERGE_METHOD" --delete-branch --admin; then
+              echo "✅ Successfully merged PR #$PR_NUMBER"
+              echo "merged=true" >> $GITHUB_OUTPUT
+              return 0
+            else
+              retry_count=$((retry_count + 1))
+              if [ $retry_count -lt $max_retries ]; then
+                echo "⚠️ Merge failed (attempt $retry_count/$max_retries). Retrying in 10 seconds..."
+                echo "This could be due to base branch updates or temporary GitHub issues."
+                sleep 10
+              else
+                echo "❌ Merge failed after $max_retries attempts. Manual intervention may be required."
+                echo "merged=false" >> $GITHUB_OUTPUT
+                return 1
+              fi
+            fi
+          done
+        }
+
+        # Main logic
+        echo "🔍 Checking PR #$PR_NUMBER for required status checks..."
+
+        # Allow time for checks to initialize
+        echo "⏳ Waiting $CHECK_INTERVAL seconds for checks to initialize..."
+        sleep "$CHECK_INTERVAL"
+
+        # Get required checks only (GitHub only requires these for merge)
+        REQUIRED_CHECKS=$(get_checks "required")
+        echo "📋 Required checks: $REQUIRED_CHECKS"
+
+        REQUIRED_COUNT=$(count_checks "$REQUIRED_CHECKS")
+
+        # Handle case with no required checks - can merge immediately
+        if [ "$REQUIRED_COUNT" -eq 0 ]; then
+          echo "✅ No required status checks configured. PR is ready to merge."
+          echo "Proceeding with auto-approval and merge..."
+          if approve_and_merge_pr "Auto-approved by trunk upgrade action (no required status checks)"; then
+            exit 0
+          else
+            echo "❌ Failed to merge PR. Exiting with error."
+            exit 1
+          fi
+        fi
+
+        echo "⏳ Waiting for $REQUIRED_COUNT required status checks to pass..."
+
+        # Wait for required checks to complete with timeout
+        timeout_seconds=$((TIMEOUT_MINUTES * 60))
+        start_time=$(date +%s)
+
+        while true; do
+          current_time=$(date +%s)
+          elapsed=$((current_time - start_time))
+
+          if [ $elapsed -gt $timeout_seconds ]; then
+            echo "⏰ Timeout reached after ${TIMEOUT_MINUTES} minutes"
+            echo "❌ Checks did not complete within the timeout period"
+            echo "merged=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+          CURRENT_CHECKS=$(get_checks "required")
+          echo "📊 Current checks status: $CURRENT_CHECKS"
+
+          # Check for failed checks
+          if has_failed_checks "$CURRENT_CHECKS"; then
+            echo "❌ One or more required checks have failed. Exiting..."
+            echo "merged=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+          # Check if all required checks have passed
+          PENDING_COUNT=$(count_pending_checks "$CURRENT_CHECKS")
+          if [ "$PENDING_COUNT" -eq 0 ]; then
+            if approve_and_merge_pr "Auto-approved by trunk upgrade action (all required checks passed)"; then
+              break
+            else
+              echo "❌ Failed to merge PR after all checks passed. Exiting with error."
+              exit 1
+            fi
+          else
+            remaining=$((timeout_seconds - elapsed))
+            echo "⏳ Some required checks are still running or pending ($PENDING_COUNT remaining)."
+            echo "Retrying in ${CHECK_INTERVAL}s (${remaining}s remaining)..."
+            sleep "$CHECK_INTERVAL"
+          fi
+        done
