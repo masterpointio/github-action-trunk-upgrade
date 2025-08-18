@@ -17,7 +17,8 @@ This action automates the process of keeping your Trunk configuration up-to-date
 ### Prerequisites
 
 - GitHub repository with Trunk configuration
-- GitHub App credentials (recommended) or Personal Access Token
+- Personal Access Token (required)
+- GitHub App credentials (recommended for enhanced performance and security)
 - Repository permissions: `contents: write` and `pull-requests: write`
 
 ### Step-by-Step Instructions
@@ -25,7 +26,7 @@ This action automates the process of keeping your Trunk configuration up-to-date
 1. **Set up authentication secrets** in your repository:
    - `BOT_APP_ID` - GitHub App ID
    - `BOT_APP_PRIVATE_KEY` - GitHub App private key
-   - `ORG_PAT` - Fine-grained Personal Access Token scoped to this repository with "Contents: Read and write" and "Pull requests: Read and write"
+   - `ORG_PAT` - Personal Access Token with admin permissions
 2. **Create workflow file** `.github/workflows/trunk-upgrade.yml`:
 
 ```yaml
@@ -92,7 +93,24 @@ with:
   github-token: ${{ secrets.TEAM_PAT }}
 ```
 
-Dual-token setup provides better security (permission separation) and performance (higher rate limits).
+**How the dual-token setup works:**
+
+1. **GitHub App Token (Primary)**: Generated from `app-id` + `app-private-key`
+   - Used for PR creation via trunk-io action
+   - Higher rate limits (5,000/hr vs 1,000/hr)
+   - Clean bot attribution in commits
+   - Scoped permissions (only what the app needs)
+
+2. **Personal Access Token (Fallback/Admin)**: `github-token` input
+   - Used for merge operations with `--admin` flag
+   - Bypasses branch protection rules reliably
+   - Required for repositories with strict protection settings
+   - Falls back if no App credentials provided
+
+**Token Selection Logic:**
+
+- If App credentials provided → Use App token for PR creation, PAT for merge
+- If no App credentials → Use PAT for both operations
 
 ## Built By
 
