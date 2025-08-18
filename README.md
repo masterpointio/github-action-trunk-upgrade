@@ -25,8 +25,7 @@ This action automates the process of keeping your Trunk configuration up-to-date
 1. **Set up authentication secrets** in your repository:
    - `BOT_APP_ID` - GitHub App ID
    - `BOT_APP_PRIVATE_KEY` - GitHub App private key
-   - `ORG_PAT` - Personal Access Token with admin permissions
-
+   - `ORG_PAT` - Fine-grained Personal Access Token scoped to this repository with "Contents: Read and write" and "Pull requests: Read and write"
 2. **Create workflow file** `.github/workflows/trunk-upgrade.yml`:
 
 ```yaml
