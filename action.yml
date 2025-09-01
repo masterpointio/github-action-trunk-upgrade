@@ -4,40 +4,32 @@ author: hello@masterpoint.io
 
 inputs:
   github-token:
-    description: GitHub token for creating PRs and performing operations
-    required: true
+    description: GitHub token for creating PRs and performing operations (required if app credentials not provided)
 
   app-id:
     description: GitHub App ID for bot authentication
-    required: false
 
   app-private-key:
     description: GitHub App private key for bot authentication
-    required: false
 
   reviewers:
     description: Reviewers to assign to the PR (e.g., '@org/team' or 'user1,user2')
-    required: false
     default: ""
 
   prefix:
     description: Prefix for commit messages and PR titles
-    required: false
     default: "chore: "
 
   merge-method:
     description: Method to use for merging (squash, merge, rebase)
-    required: false
     default: squash
 
   check-timeout-minutes:
     description: Maximum time to wait for status checks (in minutes)
-    required: false
     default: "10"
 
   check-interval-seconds:
     description: Interval between status check polls (in seconds)
-    required: false
     default: "30"
 
 outputs:
@@ -59,8 +51,9 @@ runs:
     - name: Validate inputs
       shell: bash
       run: |
-        if [[ -z "${{ inputs.github-token }}" ]]; then
-          echo "::error::github-token is required"
+        # Ensure either github-token OR app credentials are provided
+        if [[ -z "${{ inputs.github-token }}" && ( -z "${{ inputs.app-id }}" || -z "${{ inputs.app-private-key }}" ) ]]; then
+          echo "::error::Either github-token must be provided, or both app-id and app-private-key must be provided"
           exit 1
         fi
 
@@ -100,7 +93,7 @@ runs:
       id: auto-merge
       shell: bash
       env:
-        GH_TOKEN: ${{ inputs.github-token }}
+        GH_TOKEN: ${{ steps.github-token.outputs.token }}
         PR_NUMBER: ${{ steps.trunk-upgrade.outputs.pull-request-number }}
         REPO_URL: https://github.com/${{ github.repository }}
         MERGE_METHOD: ${{ inputs.merge-method }}
