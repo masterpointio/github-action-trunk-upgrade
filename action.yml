@@ -124,32 +124,7 @@ runs:
           echo "$1" | jq '[.[] | select(.state!="SUCCESS" or .bucket!="pass")] | length'
         }
 
-        merge_pr() {
-          echo "🤖 Auto-merging PR $REPO_URL/pull/$PR_NUMBER..."
 
-          # Retry merge up to 3 times to handle base branch updates
-          local max_retries=3
-          local retry_count=0
-
-          while [ $retry_count -lt $max_retries ]; do
-            if gh pr merge "$PR_NUMBER" --"$MERGE_METHOD" --delete-branch --admin; then
-              echo "✅ Successfully merged PR #$PR_NUMBER"
-              echo "merged=true" >> $GITHUB_OUTPUT
-              return 0
-            else
-              retry_count=$((retry_count + 1))
-              if [ $retry_count -lt $max_retries ]; then
-                echo "⚠️ Merge failed (attempt $retry_count/$max_retries). Retrying in 10 seconds..."
-                echo "This could be due to base branch updates or temporary GitHub issues."
-                sleep 10
-              else
-                echo "❌ Merge failed after $max_retries attempts. Manual intervention may be required."
-                echo "merged=false" >> $GITHUB_OUTPUT
-                return 1
-              fi
-            fi
-          done
-        }
 
         # Main logic
         echo "🔍 Checking PR #$PR_NUMBER for required status checks..."
@@ -167,13 +142,11 @@ runs:
         # Handle case with no required checks - can merge immediately
         if [ "$REQUIRED_COUNT" -eq 0 ]; then
           echo "✅ No required status checks configured. PR is ready to merge."
-          echo "Proceeding with auto-merge..."
-          if merge_pr; then
-            exit 0
-          else
-            echo "❌ Failed to merge PR. Exiting with error."
-            exit 1
-          fi
+          echo "🤖 Auto-merging PR $REPO_URL/pull/$PR_NUMBER..."
+          gh pr merge "$PR_NUMBER" --"$MERGE_METHOD" --delete-branch --admin
+          echo "✅ Successfully merged PR #$PR_NUMBER"
+          echo "merged=true" >> $GITHUB_OUTPUT
+          exit 0
         fi
 
         echo "⏳ Waiting for $REQUIRED_COUNT required status checks to pass..."
@@ -206,12 +179,11 @@ runs:
           # Check if all required checks have passed
           PENDING_COUNT=$(count_pending_checks "$CURRENT_CHECKS")
           if [ "$PENDING_COUNT" -eq 0 ]; then
-            if merge_pr; then
-              break
-            else
-              echo "❌ Failed to merge PR after all checks passed. Exiting with error."
-              exit 1
-            fi
+            echo "🤖 Auto-merging PR $REPO_URL/pull/$PR_NUMBER..."
+            gh pr merge "$PR_NUMBER" --"$MERGE_METHOD" --delete-branch --admin
+            echo "✅ Successfully merged PR #$PR_NUMBER"
+            echo "merged=true" >> $GITHUB_OUTPUT
+            break
           else
             remaining=$((timeout_seconds - elapsed))
             echo "⏳ Some required checks are still running or pending ($PENDING_COUNT remaining)."
