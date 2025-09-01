@@ -124,10 +124,8 @@ runs:
           echo "$1" | jq '[.[] | select(.state!="SUCCESS" or .bucket!="pass")] | length'
         }
 
-        approve_and_merge_pr() {
-          local approval_message="$1"
-          echo "🤖 Auto-approving and merging PR $REPO_URL/pull/$PR_NUMBER..."
-          gh pr review "$PR_NUMBER" --approve --body "$approval_message"
+        merge_pr() {
+          echo "🤖 Auto-merging PR $REPO_URL/pull/$PR_NUMBER..."
 
           # Retry merge up to 3 times to handle base branch updates
           local max_retries=3
@@ -169,8 +167,8 @@ runs:
         # Handle case with no required checks - can merge immediately
         if [ "$REQUIRED_COUNT" -eq 0 ]; then
           echo "✅ No required status checks configured. PR is ready to merge."
-          echo "Proceeding with auto-approval and merge..."
-          if approve_and_merge_pr "Auto-approved by trunk upgrade action (no required status checks)"; then
+          echo "Proceeding with auto-merge..."
+          if merge_pr; then
             exit 0
           else
             echo "❌ Failed to merge PR. Exiting with error."
@@ -208,7 +206,7 @@ runs:
           # Check if all required checks have passed
           PENDING_COUNT=$(count_pending_checks "$CURRENT_CHECKS")
           if [ "$PENDING_COUNT" -eq 0 ]; then
-            if approve_and_merge_pr "Auto-approved by trunk upgrade action (all required checks passed)"; then
+            if merge_pr; then
               break
             else
               echo "❌ Failed to merge PR after all checks passed. Exiting with error."
