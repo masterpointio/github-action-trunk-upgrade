@@ -4,7 +4,8 @@ author: hello@masterpoint.io
 
 inputs:
   github-token:
-    description: GitHub token for creating PRs and performing operations (required if app credentials not provided)
+    description: GitHub token for creating PRs and performing operations
+    required: true
 
   app-id:
     description: GitHub App ID for bot authentication
@@ -51,9 +52,8 @@ runs:
     - name: Validate inputs
       shell: bash
       run: |
-        # Ensure either github-token OR app credentials are provided
-        if [[ -z "${{ inputs.github-token }}" && ( -z "${{ inputs.app-id }}" || -z "${{ inputs.app-private-key }}" ) ]]; then
-          echo "::error::Either github-token must be provided, or both app-id and app-private-key must be provided"
+        if [[ -z "${{ inputs.github-token }}" ]]; then
+          echo "::error::github-token is required"
           exit 1
         fi
 
@@ -93,7 +93,7 @@ runs:
       id: auto-merge
       shell: bash
       env:
-        GH_TOKEN: ${{ steps.github-token.outputs.token }}
+        GH_TOKEN: ${{ inputs.github-token }}
         PR_NUMBER: ${{ steps.trunk-upgrade.outputs.pull-request-number }}
         REPO_URL: https://github.com/${{ github.repository }}
         MERGE_METHOD: ${{ inputs.merge-method }}
@@ -124,8 +124,10 @@ runs:
           echo "$1" | jq '[.[] | select(.state!="SUCCESS" or .bucket!="pass")] | length'
         }
 
-        merge_pr() {
-          echo "🤖 Auto-merging PR $REPO_URL/pull/$PR_NUMBER..."
+        approve_and_merge_pr() {
+          local approval_message="$1"
+          echo "🤖 Auto-approving and merging PR $REPO_URL/pull/$PR_NUMBER..."
+          gh pr review "$PR_NUMBER" --approve --body "$approval_message"
 
           # Retry merge up to 3 times to handle base branch updates
           local max_retries=3
@@ -167,8 +169,8 @@ runs:
         # Handle case with no required checks - can merge immediately
         if [ "$REQUIRED_COUNT" -eq 0 ]; then
           echo "✅ No required status checks configured. PR is ready to merge."
-          echo "Proceeding with auto-merge..."
-          if merge_pr; then
+          echo "Proceeding with auto-approval and merge..."
+          if approve_and_merge_pr "Auto-approved by trunk upgrade action (no required status checks)"; then
             exit 0
           else
             echo "❌ Failed to merge PR. Exiting with error."
@@ -206,7 +208,7 @@ runs:
           # Check if all required checks have passed
           PENDING_COUNT=$(count_pending_checks "$CURRENT_CHECKS")
           if [ "$PENDING_COUNT" -eq 0 ]; then
-            if merge_pr; then
+            if approve_and_merge_pr "Auto-approved by trunk upgrade action (all required checks passed)"; then
               break
             else
               echo "❌ Failed to merge PR after all checks passed. Exiting with error."
