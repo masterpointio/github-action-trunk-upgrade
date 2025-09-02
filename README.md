@@ -10,14 +10,14 @@
 
 A reusable GitHub Action for automated [Trunk](https://trunk.io) upgrades with status check handling and auto-merge.
 
-This action automates the process of keeping your Trunk configuration up-to-date by creating pull requests for upgrades and automatically merging them after status checks pass. It follows security best practices with dual-token authentication and only waits for required status checks, avoiding unnecessary delays from optional checks.
+This action automates the process of keeping your Trunk configuration up-to-date by creating pull requests for upgrades and automatically merging them after status checks pass. It follows security best practices with a two-token setup and only waits for required status checks, avoiding unnecessary delays from optional checks.
 
 ## Usage
 
 ### Prerequisites
 
 - GitHub repository with Trunk configuration
-- Personal Access Token (required)
+- Personal Access Token from a code owner or team member (required)
 - GitHub App credentials (recommended for enhanced performance and security)
 - Repository permissions: `contents: write` and `pull-requests: write`
 
@@ -26,7 +26,7 @@ This action automates the process of keeping your Trunk configuration up-to-date
 1. **Set up authentication secrets** in your repository:
    - `BOT_APP_ID` - GitHub App ID
    - `BOT_APP_PRIVATE_KEY` - GitHub App private key
-   - `ORG_PAT` - Personal Access Token with admin permissions
+   - `CODE_OWNER_PAT` - Personal Access Token from a code owner or team member
 2. **Create workflow file** `.github/workflows/trunk-upgrade.yml`:
 
 ```yaml
@@ -50,7 +50,7 @@ jobs:
         with:
           app-id: ${{ secrets.BOT_APP_ID }}
           app-private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
-          github-token: ${{ secrets.ORG_PAT }}
+          github-token: ${{ secrets.CODE_OWNER_PAT }}
           reviewers: "@org/engineering"
 ```
 
@@ -84,16 +84,16 @@ with:
   github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-**Dual-Token (Recommended):**
+**Two-Token Setup (Recommended):**
 
 ```yaml
 with:
   app-id: ${{ secrets.BOT_APP_ID }}
   app-private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
-  github-token: ${{ secrets.TEAM_PAT }}
+  github-token: ${{ secrets.CODE_OWNER_PAT }}
 ```
 
-**How the dual-token setup works:**
+**How the two-token setup works:**
 
 1. **GitHub App Token (Primary)**: Generated from `app-id` + `app-private-key`
    - Used for PR creation via trunk-io action
@@ -101,16 +101,24 @@ with:
    - Clean bot attribution in commits
    - Scoped permissions (only what the app needs)
 
-2. **Personal Access Token (Fallback/Admin)**: `github-token` input
-   - Used for merge operations with `--admin` flag
-   - Bypasses branch protection rules reliably
-   - Required for repositories with strict protection settings
+2. **Personal Access Token (Code Reviewer)**: `github-token` input
+   - Used for merge operations to satisfy code owner requirements
+   - Should be from a user who is a code owner or team member
+   - Required for repositories with code owner review requirements
+   - Bypasses the "can't approve own PR" limitation
    - Falls back if no App credentials provided
+
+**Why Two-Token Setup is Recommended:**
+
+Many repositories have branch protection rules requiring code owner reviews. When a GitHub App creates a PR, it cannot approve its own PR due to GitHub's security model. The two-token approach solves this by:
+
+- **App creates the PR** → Clean bot attribution
+- **Code owner PAT approves/merges** → Satisfies repository protection rules
 
 **Token Selection Logic:**
 
-- If App credentials provided → Use App token for PR creation, PAT for merge
-- If no App credentials → Use PAT for both operations
+- If App credentials provided → Use App token for PR creation, PAT for approval/merge
+- If no App credentials → Use PAT for both operations (**Note**: This won't work if the repository has rulesets or branch protection rules requiring code owner reviews, since the same user/token cannot create and approve their own PR)
 
 ## Built By
 
