@@ -17,14 +17,14 @@ runtimes:
 # This is the section where you manage your linters. (https://docs.trunk.io/check/configuration)
 lint:
   enabled:
-    - renovate@42.27.1
-    - actionlint@1.7.9
-    - checkov@3.2.495
+    - renovate@42.69.2
+    - actionlint@1.7.10
+    - checkov@3.2.497
     - git-diff-check
-    - markdownlint@0.46.0
-    - prettier@3.7.3
-    - trivy@0.67.2
-    - trufflehog@3.91.1
+    - markdownlint@0.47.0
+    - prettier@3.7.4
+    - trivy@0.68.2
+    - trufflehog@3.92.4
     - yamllint@1.37.1
   ignore:
     # Ignore CHANGELOG.md as release-please manages this file
