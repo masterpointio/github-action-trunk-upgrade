@@ -2,6 +2,7 @@
   "extends": [
     "config:best-practices"
   ],
+  "minimumReleaseAge": "3 days",
   "enabledManagers": [
     "github-actions"
   ],
