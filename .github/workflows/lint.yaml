@@ -1,45 +1,22 @@
 name: Lint
 
+# We ignore the dangerous-triggers warning because forked PRs
+# require repo secrets to run some of the defined checks,
+# and we protect against malicious actors by requiring approval
+# for all external contributors before workflows will run.
+on: pull_request_target # zizmor: ignore[dangerous-triggers]
+
 concurrency:
-  group: lint-${{ github.head_ref || github.run_id }}
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
-# Use pull_request_target to support fork PRs and enable `checks: write` permission
-# This allows external contributors to get linting feedback on their PRs
-on: pull_request_target
-
-permissions:
-  actions: read
-  checks: write # Required to post check results back to the PR
-  contents: read
-  pull-requests: read
+permissions: {}
 
 jobs:
   lint:
-    runs-on: ubuntu-latest
-    steps:
-      # SECURITY: With pull_request_target, checkout defaults to the base branch (main)
-      # We must explicitly checkout the PR head to lint the actual changes
-      - name: Check out Git repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          # Checkout the actual PR code, not the base branch
-          ref: ${{ github.event.pull_request.head.sha }}
-          # Support forks by using the head repository
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          # SECURITY: Disable credential persistence to prevent potential misuse
-          persist-credentials: false
-
-      - name: Trunk Check
-        uses: trunk-io/trunk-action@04ba50e7658c81db7356da96657e6e77f220bfa3 # v1.3.1
-        env:
-          # NOTE: inject the GITHUB_TOKEN for the trunk managed tflint linter
-          # https://github.com/terraform-linters/tflint/blob/master/docs/user-guide/plugins.md#avoiding-rate-limiting
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  conventional-title:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    uses: masterpointio/actions/.github/workflows/lint.yaml@7dad35e85d864ca5dda0971dfd3c940cc67ed380 #v0.3.0
+    permissions:
+      actions: read # for trunk-action
+      checks: write # for trunk-action
+      contents: read # for trunk-action + checkout
+      pull-requests: read # for action-semantic-pull-request
